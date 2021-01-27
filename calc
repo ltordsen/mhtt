@@ -6,7 +6,7 @@ import csv
 import os
 import re
 import sys
-import time
+import time as time_module
 
 from pprint import pprint
 
@@ -47,7 +47,6 @@ def get_segment_results(args):
 
         segname = os.path.basename(csv_path).replace('.csv', '')
         delimiter = args.delimiter if args.delimiter else ','
-        print "(get_segment_results)delimiter = \"%s\"" % delimiter
 
         with open(csv_path) as csvh:
             contents = csv.reader(csvh, delimiter=delimiter)
@@ -71,14 +70,12 @@ def get_segment_results(args):
 
                 # Format time into hh:mm:ss
                 sec_match = re.search(sec_re, time)
-                mmss_match= re.search(mmss_re, time)
+                mmss_match = re.search(mmss_re, time)
                 if sec_match:
                     secs = sec_match.group(1)
-                    #print "sec match:%s" % secs
                     time = "00:00:%s" % secs
                 if mmss_match:
                     mmss = mmss_match.group(1)
-                    #print "mmss match:%s" % mmss
                     time = "00:%s" % mmss
 
                 if segname in segment_results:
@@ -95,10 +92,6 @@ def get_segment_results(args):
                     }}
                 all_people.add(name)
 
-    print "all_people="
-    pprint(all_people)
-    pprint(segment_results)
-
     return segment_results, all_people
 
 def nsecs(hhmmss_str):
@@ -112,23 +105,20 @@ def nsecs(hhmmss_str):
     return secs
 
 def format_secs(seconds):
-    time_fmt = time.gmtime(seconds)
-    return time.strftime("%H:%M:%S", time_fmt)
+    time_fmt = time_module.gmtime(seconds)
+    return time_module.strftime("%H:%M:%S", time_fmt)
 
 def add_times(sr, all_people):
-    # This is probably dependent on what format the input time is in.  I'll
     person_results = dict()
 
     # Need to account for people missing a segment.  There might be a better
     # way to do this.
     sr_tmp = dict()
-    for seg in sr: #sr.keys():
+    for seg in sr:
         ranks = [int(sr[seg][p]['rank']) for p in sr[seg].keys()]
         maxrank = max(ranks) + 1 # Incase someone missed a segment
-        pprint(ranks)
         for p in all_people:
             if p not in sr[seg].keys():
-                print "%s is not in segment %s" % (p, seg)
                 if seg not in sr_tmp:
                     sr_tmp[seg] = dict()
                 sr_tmp[seg][p] = {'rank': str(maxrank), 'date': 'N/A', 'hr': 'N/A',
@@ -139,25 +129,19 @@ def add_times(sr, all_people):
         for person in sr_tmp[seg]:
             sr[seg][person] = copy.deepcopy(sr_tmp[seg][person])
 
-
-    print "after appeding sr, sr=\n----"
-    pprint(sr)
-    print "----"
-
+    # Calculate rank, and organize the results by person.
     for person in all_people:
         total_time = 0
         nsegs = float(len(sr.keys()))
         rank_avg = 0.0
         person_results[person] = dict()
         for seg in sr:
-            print "seg=%s" % seg
             ranks = [int(sr[seg][p]['rank']) for p in sr[seg].keys()]
-            time = sr[seg][person]['time'];
+            time = sr[seg][person]['time']
             if sr[seg][person]['time'] != 'N/A':
                 total_time += nsecs(time)
             rank_avg += float(sr[seg][person]['rank'])/nsegs
-            print "person=%s, time=%s, total_time=%d, rank=%s, nsegs=%d, rank_avg=%f" % (person, time, total_time, sr[seg][person]['rank'], nsegs, rank_avg)
-            person_results[person][seg] = {'time':time, 'time_secs': nsecs(time), 'rank': sr[seg][p]['rank']}
+            person_results[person][seg] = {'time': time, 'time_secs': nsecs(time), 'rank': sr[seg][p]['rank']}
 
         strtime = format_secs(total_time)
         person_results[person]['total_time'] = strtime
@@ -172,22 +156,21 @@ def main():
     parser.add_argument('segment_csv', nargs='+')
     parser.add_argument('-d', '--delimiter', action="store")
     parser.add_argument('-s', '--score', action="store_true")
-    #parser.add_argument('-c', '--club', action='store')
     args = parser.parse_args()
-    sr,people = get_segment_results(args)
+    sr, people = get_segment_results(args)
     person_results = add_times(sr, people)
 
-    print "person_results=\n----"
-    pprint(person_results)
-    print "----"
+    # We could get rid of the score option,  delete the column from the csv (when necessary),
+    # and get rid of the 'if args.score' logic.
     if args.score:
         line = "Name#%s#Total Time#Rank Avg" % '#'.join(sr.keys())
     else:
         line = "Name#%s#TotalTime" % '#'.join(sr.keys())
     print line
+
     for pr in person_results:
         line = "%s#%s#%s" % (pr,
-                            '#'.join([person_results[pr][s]['time'] for s in sr.keys()]),
+                            '#'.join([person_results[pr][s]['time'] for s in sr]),
                             person_results[pr]['total_time'])
         if args.score:
             line = "%s#%02f" % (line, person_results[pr]['rank_avg'])
