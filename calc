@@ -40,13 +40,15 @@ def get_segment_results(args):
     # be the ideal format anyway.
     sec_re = re.compile(r'(\d{1,2})s')
     mmss_re = re.compile(r'(\d{1,2}:\d{1,2})')
+
+    delimiter = args.delimiter if args.delimiter else ','
+
     for csv_path in args.segment_csv:
         if not os.path.exists(csv_path):
             print "Couldn't find %s" % csv_path
             sys.exit(1)
 
         segname = os.path.basename(csv_path).replace('.csv', '')
-        delimiter = args.delimiter if args.delimiter else ','
 
         with open(csv_path) as csvh:
             contents = csv.reader(csvh, delimiter=delimiter)
@@ -73,10 +75,10 @@ def get_segment_results(args):
                 mmss_match = re.search(mmss_re, time)
                 if sec_match:
                     secs = sec_match.group(1)
-                    time = "00:00:%s" % secs
+                    time = "0:00:%s" % secs
                 if mmss_match:
                     mmss = mmss_match.group(1)
-                    time = "00:%s" % mmss
+                    time = "0:%s" % mmss
 
                 if segname in segment_results:
                     segment_results[segname][name] = {
@@ -95,7 +97,7 @@ def get_segment_results(args):
     return segment_results, all_people
 
 def nsecs(hhmmss_str):
-    """calculate number of seconds.  the string should be formatted as hh:mm:ss"""
+    """calculate number of seconds.  the string should be formatted as h:mm:ss"""
 
     if hhmmss_str == 'N/A':
         return hhmmss_str
@@ -106,7 +108,7 @@ def nsecs(hhmmss_str):
 
 def format_secs(seconds):
     time_fmt = time_module.gmtime(seconds)
-    return time_module.strftime("%H:%M:%S", time_fmt)
+    return time_module.strftime("%-H:%M:%S", time_fmt)
 
 def add_times(sr, all_people):
     person_results = dict()
