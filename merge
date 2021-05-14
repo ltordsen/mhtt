@@ -1,0 +1,108 @@
+#!/usr/bin/env python
+
+import argparse
+import copy
+import csv as csv_module
+import os
+import sys
+import textwrap
+
+from utils.common import nsecs,fmt_time_from_txt
+
+# A simple script to merge CSVs.  It's easy enough to do manually, but
+# hopefully this is less error-prone.  This could be incorporated into the
+# calc script but would need a little reconfiguring of the args.
+
+def read_csv(csv_path, delimiter):
+    """Read a CSV, convert it to a dict, and return it."""
+
+    if not os.path.exists(csv_path):
+        sys.sterr.write("read_csv: cannot find %s -- aborting.\n" % csv_path)
+        sys.exit(1)
+
+    people = {}
+    fields = []
+    with open (csv_path, 'r') as fh:
+        csv = csv_module.DictReader(fh, delimiter=delimiter)
+        fieldnames = csv.fieldnames
+        for row in csv:
+            name = row['Name']
+            people[name] = row
+    return fieldnames, people
+
+def dict2csv(fields, indict):
+
+    csv = []
+
+    print("fields=%s" % fields)
+    for person in indict:
+        row = [indict[person][val] for val in fields]
+        csv.append(row)
+
+    return csv
+
+def merge_csvs(csv_list):
+    """Merge the CSVs by taking the fastest time if multiple times exist."""
+    merged = {}
+
+    # csv_list is a list of dicts
+    for csv in csv_list:
+        for name in csv.keys():
+            if name in merged:
+                curr = nsecs(fmt_time_from_txt(merged[name]['Time']))
+                potential = nsecs(fmt_time_from_txt(csv[name]['Time']))
+                if potential < curr:
+                    merged[name] = copy.deepcopy(csv[name])
+            else:
+                merged[name] = copy.deepcopy(csv[name])
+    return merged
+
+def get_csvs(args):
+    """Read the CSVs"""
+
+    delimiter = args.delimiter if args.delimiter else '#'
+    if not args.csvs:
+        sys.stderr.write("Need at least one CSV to read.\n")
+        sys.exit(1)
+    elif len(args.csvs) == 1:
+        # Just read the csv and return it.  Not very useful.
+        return read_csv(args.csvs[0], delimiter)
+    else:
+        csvs = []
+        for csv in args.csvs:
+            fieldnames, elt = read_csv(csv, delimiter)
+            csvs.append(elt)
+
+    return fieldnames, csvs
+
+def main():
+    parser = argparse.ArgumentParser('Merge CSVs of the same segment.')
+
+    # Its assumed all the files are delimited by the same character.  Note
+    # ',' is a very messy delimiter with name fields, etc.  So the default is
+    # '#', which doesn't occur outside code very much.
+    parser.add_argument('-d', '--delimiter', action="store",
+                        help="What delimits the files.  The default is '#'")
+    parser.add_argument('-o', '--outfile', action="store", help=textwrap.dedent(
+        """Write to an output file.  By default, output is written to stdout"""))
+    parser.add_argument("csvs", nargs='+', action="store", help=textwrap.dedent("""
+        CSVs to read.  Needs at least one."""))
+
+    args = parser.parse_args()
+    fields, result_dict = get_csvs(args)
+    merged = merge_csvs(result_dict)
+    results_csv = dict2csv(fields, merged)
+
+    if args.outfile:
+        with open(args.outfile, 'w') as fh:
+            cw = csv_module.writer(fh)
+            cw.writerow(fields)
+            cw.writerows(results_csv)
+    else:
+        delimiter = args.delimiter if args.delimiter else '#'
+        print(delimiter.join(fields))
+        for row in results_csv:
+            print(delimiter.join(row))
+
+if __name__ == "__main__":
+    main()

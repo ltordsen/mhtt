@@ -1,5 +1,9 @@
 #!/usr/bin/env python
 
+"""
+Calculate TT results.
+Note: This isn't fully-tested with python 2.  I'd use python3.
+"""
 import argparse
 import copy
 import csv
@@ -8,18 +12,21 @@ import re
 import sys
 import time as time_module
 
+from utils.common import nsecs,fmt_time_from_txt,secs2text
+
 from pprint import pprint
 
 def get_club_people(club_file_path):
     """ Read a simple textfile of names of club members.  Return a list"""
     if not os.path.exists(club_file_path):
-        print "Couldn't find %s" % club_file_path
+        sys.stderr.write("Couldn't find %s\n" % club_file_path)
         sys.exit(1)
 
     with open(club_file_path, 'r') as fh:
         peeps = fh.read().splitlines()
 
     return peeps
+
 ##########################
 # Per Aaron -- time regular expressions
 # """
@@ -41,11 +48,11 @@ def get_segment_results(args):
     sec_re = re.compile(r'(\d{1,2})s')
     mmss_re = re.compile(r'(\d{1,2}:\d{1,2})')
 
-    delimiter = args.delimiter if args.delimiter else ','
+    delimiter = args.delimiter if args.delimiter else '#'
 
     for csv_path in args.segment_csv:
         if not os.path.exists(csv_path):
-            print "Couldn't find %s" % csv_path
+            sys.stderr.write("Couldn't find %s\n" % csv_path)
             sys.exit(1)
 
         segname = os.path.basename(csv_path).replace('.csv', '')
@@ -61,56 +68,36 @@ def get_segment_results(args):
                 except IndexError:
                     # Shouldn't hit this unless the strava format changes or
                     # there was a copy/paste error when making the csv.
-                    print "WARNING: couldn't process row=%s" % row
+                    sys.stderr.write("WARNING: couldn't process row=%s\n" % row)
                     continue
                 if rank == 'Rank':
                     # Skip the first/header row.
                     continue
                 elif name not in club_people:
-                    print "Skipping %s -- not in club" % name
+                    sys.stderr.write("Skipping %s -- not in club\n" % name)
                     continue
 
-                # Format time into hh:mm:ss
-                sec_match = re.search(sec_re, time)
-                mmss_match = re.search(mmss_re, time)
-                if sec_match:
-                    secs = sec_match.group(1)
-                    time = "0:00:%s" % secs
-                if mmss_match:
-                    mmss = mmss_match.group(1)
-                    time = "0:%s" % mmss
+                formatted_time = fmt_time_from_txt(time)
 
                 if segname in segment_results:
                     segment_results[segname][name] = {
                         'rank': rank, 'date': date,
                         'hr': hr, 'power': power,
-                        'time': time, 'speed': speed
+                        'time': formatted_time, 'speed': speed
                     }
                 else:
                      segment_results[segname] = {name: {
                         'rank': rank, 'date': date,
                         'hr': hr, 'power': power,
-                        'time': time, 'speed': speed
+                        'time': formatted_time, 'speed': speed
                     }}
                 all_people.add(name)
 
     return segment_results, all_people
 
-def nsecs(hhmmss_str):
-    """calculate number of seconds.  the string should be formatted as h:mm:ss"""
-
-    if hhmmss_str == 'N/A':
-        return hhmmss_str
-    tlist = hhmmss_str.split(':')
-    hh, mm, ss = int(tlist[0]), int(tlist[1]), int(tlist[2])
-    secs = ss + 60*mm + 60*60*hh
-    return secs
-
-def format_secs(seconds):
-    time_fmt = time_module.gmtime(seconds)
-    return time_module.strftime("%-H:%M:%S", time_fmt)
-
 def add_times(sr, all_people):
+    """Add the times for all people over all the segments"""
+
     person_results = dict()
 
     # Need to account for people missing a segment.  There might be a better
@@ -143,14 +130,15 @@ def add_times(sr, all_people):
             if sr[seg][person]['time'] != 'N/A':
                 total_time += nsecs(time)
             rank_avg += float(sr[seg][person]['rank'])/nsegs
-            person_results[person][seg] = {'time': time, 'time_secs': nsecs(time), 'rank': sr[seg][p]['rank']}
+            person_results[person][seg] = \
+                {'time': time, 'time_secs': nsecs(time),
+                 'rank': sr[seg][p]['rank'], 'date': sr[seg][person]['date']}
 
-        strtime = format_secs(total_time)
+        strtime = secs2text(total_time)
         person_results[person]['total_time'] = strtime
         person_results[person]['rank_avg'] = rank_avg
 
     return person_results
-
 
 def main():
     parser = argparse.ArgumentParser('Calculate results')
@@ -158,25 +146,45 @@ def main():
     parser.add_argument('segment_csv', nargs='+')
     parser.add_argument('-d', '--delimiter', action="store")
     parser.add_argument('-s', '--score', action="store_true")
+    parser.add_argument('-o', '--outfile', action="store")
     args = parser.parse_args()
     sr, people = get_segment_results(args)
     person_results = add_times(sr, people)
 
     # We could get rid of the score option,  delete the column from the csv (when necessary),
     # and get rid of the 'if args.score' logic.
+
+    delimiter = args.delimiter if args.delimiter else '#'
+
+    # Print to an outfile if specified.
+    fh = None
+    if args.outfile:
+       fh = open(args.outfile, 'w')
+       sys.stdout = fh
+
     if args.score:
-        line = "Name#%s#Total Time#Rank Avg" % '#'.join(sr.keys())
+        line = delimiter.join(["Name"] + list(sr.keys()) + ["Total Time", "Rank Avg"])
     else:
-        line = "Name#%s#TotalTime" % '#'.join(sr.keys())
-    print line
+        line = delimiter.join(["Name"] + list(sr.keys()) + ["Total Time"])
+    print(line)
 
     for pr in person_results:
-        line = "%s#%s#%s" % (pr,
-                            '#'.join([person_results[pr][s]['time'] for s in sr]),
-                            person_results[pr]['total_time'])
+        # Check dates for each segment.  All segments need to be completed on the same day.
+        dates = set([person_results[pr][s]['date'] for s in sr])
+        if len(dates) != 1:
+            sys.stderr.write("WARNING: %s has inconsistant dates:%s\n" % (
+                              pr, dates))
         if args.score:
-            line = "%s#%02f" % (line, person_results[pr]['rank_avg'])
-        print line
+            line = delimiter.join([pr] +
+                                  [person_results[pr][s]['time'] for s in sr] +
+                                  [person_results[pr]['total_time'], "%.2f" % person_results[pr]['rank_avg']])
+        else:
+            line = delimiter.join([pr] + [person_results[pr][s]['time'] for s in sr] +
+                                  [person_results[pr]['total_time']])
+        print(line)
+
+    if fh:
+        fh.close()
 
 if __name__ == "__main__":
     main()
